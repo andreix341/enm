@@ -70,7 +70,7 @@ wait "$HOST_CHECK_PID" || {
 
 OPEN_PORTS=$(grep -E '^[0-9]+/tcp.*open' "$LOGFILE" | awk -F/ '{print $1}' | tr '\n' ' ')
 
-# ── /etc/hosts ─────────────────────────────────────────────────────────────────
+#/etc/hosts
 if [[ -n "$DOMAIN" ]]; then
   section "/etc/hosts"
   if grep -qw "$TARGET" /etc/hosts 2>/dev/null; then
@@ -94,7 +94,7 @@ if [[ -n "$DOMAIN" ]]; then
   fi
 fi
 
-# ── Service enumeration ────────────────────────────────────────────────────────
+# Service enumeration
 section "service enumeration"
 
 WEB_TARGET="${DOMAIN:-$TARGET}"
@@ -154,7 +154,7 @@ fi
 
 [[ $SERVICES -eq 0 ]] && info "no enumerable services found"
 
-# ── Web recon ──────────────────────────────────────────────────────────────────
+# Web recon
 RAW_WEB=$(grep -E '^[0-9]+/tcp.*open' "$LOGFILE" | grep -Ei 'http' | awk -F/ '{print $1}' | tr '\n' ' ')
 WEB_PORTS=""
 
@@ -219,7 +219,7 @@ if [[ -n "$WEB_PORTS" ]]; then
     log ""
   done
 else
-  warn "no web ports — skipping ffuf"
+  warn "no web ports - skipping ffuf"
 fi
 
 log ""
