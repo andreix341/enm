@@ -7,6 +7,7 @@ A simple script i made to quickly scan machines on HackTheBox.
 ### Tools & scans
 
 - **nmap** — fast port scan `-sC -sV --top-ports 1000 --open` (top 1000 ports)
+- **/etc/hosts** - automatically adds new entries and replaces / removes old ones
 - **SMB** — os info, shares, users & vuln scan via enum4linux-ng + nmap scripts (139/445)
 - **LDAP** — domain context retrieval (389/636)
 - **WinRM** — detection hint (5985/5986)
