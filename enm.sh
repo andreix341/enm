@@ -60,7 +60,7 @@ section "port scan"
 
 (ping -c 2 -W 2 "$TARGET" &>/dev/null || nmap -sn "$TARGET" 2>/dev/null | grep -q "Host is up") &
 HOST_CHECK_PID=$!
-nmap -sC -sV -F --open "$TARGET" 2>&1 | tee -a "$LOGFILE"
+nmap -sC -sV --top-ports 1000 --open "$TARGET" 2>&1 | tee -a "$LOGFILE"
 wait "$HOST_CHECK_PID" || {
   err "host $TARGET appears to be down or unreachable. Aborting."
   exit 1
