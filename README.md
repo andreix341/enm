@@ -12,12 +12,21 @@ A simple script i made to quickly scan machines on HackTheBox.
 - **WinRM** — detection hint (5985/5986)
 - **ffuf** — directory, subdomain & vhost fuzzing (all open web ports)
 
+### Usage 
+
+```bash 
+enm <IP> [name]
+
+#Example 
+enm 10.129.244.177 snapped
+```
+
 ### Installation
 
 ```bash
 # Install dependencies
 sudo apt update
-sudo apt install nmap ffuf seclists curl -y
+sudo apt install nmap ffuf enum4linux-ng seclists curl -y
 
 # Clone and install
 git clone https://github.com/yourusername/enm.git
