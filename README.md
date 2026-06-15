@@ -9,17 +9,18 @@ A simple script i made to quickly scan machines on HackTheBox.
 - **nmap** - fast port scan `-sC -sV --top-ports 1000 --open` (top 1000 ports)
 - **/etc/hosts** - automatically adds new entries and replaces / removes old ones
 - **SMB** - os info, shares, users & vuln scan via enum4linux-ng + nmap scripts (139/445)
-- **LDAP** - domain context retrieval (389/636)
+- **LDAP** - domain context retrieval, anonymous enumeration, authenticated dump via ldapdomaindump (389/636)
 - **WinRM** - detection hint (5985/5986)
 - **ffuf** - directory, subdomain & vhost fuzzing (all open web ports)
 
-### Usage 
+### Usage
 
-```bash 
+```bash
 enm <IP> [name]
 
 #Example 
-enm 10.129.244.177 snapped
+enm 10.129.244.177 -n snapped
+enm 10.129.244.177 -u snapped -u admin -p 'P@ss1'
 ```
 
 ### Installation
@@ -27,7 +28,8 @@ enm 10.129.244.177 snapped
 ```bash
 # Install dependencies
 sudo apt update
-sudo apt install nmap ffuf enum4linux-ng seclists curl -y
+sudo apt install curl nmap seclists ffuf enum4linux-ng  ldap-utils -y
+pip install ldapdomaindump
 
 # Clone and install
 git clone https://github.com/yourusername/enm.git
