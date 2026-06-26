@@ -37,7 +37,22 @@ add_host() {
   [[ -z "$host" ]] && return
 
   if grep -qw "$host" /etc/hosts 2>/dev/null; then
-    info "$host already in /etc/hosts — skipping"
+    local current_ip
+    current_ip=$(grep -w "$host" /etc/hosts | awk '{print $1}' | head -1)
+
+    if [[ "$current_ip" == "$TARGET" ]]; then
+      info "$host already in /etc/hosts with correct IP ($TARGET) — skipping"
+    else
+      warn "$host is mapped to $current_ip, but current target is $TARGET"
+      ask "replace '$current_ip $host' with '$TARGET $host'? [Y/n]"
+      read -r confirm
+      if [[ ! "$confirm" =~ ^[Nn]$ ]]; then
+        sudo sed -i "s/^[[:space:]]*${current_ip}[[:space:]].*${host}.*/${TARGET}\t${host}/" /etc/hosts
+        info "updated $TARGET $host"
+      else
+        info "kept existing entry: $current_ip $host"
+      fi
+    fi
 
   elif grep -qP "^\s*${TARGET}\s" /etc/hosts 2>/dev/null; then
     ask "append '$host' to existing $TARGET line? [Y/n]"
@@ -335,18 +350,19 @@ if [[ -n "$WEB_PORTS" ]]; then
 
     subsection "directories — ${BASE_URL}"
     info "baseline — size:${BS} words:${BW}"
+    info "Use Ctrl + C to skip"
     ffuf -u "${BASE_URL}/FUZZ" -w "$DIR_WL" \
       -t 80 -fc 404,403 -fs "$BS" -fw "$BW" \
       $INSECURE -noninteractive 2>>"$LOGFILE" | tee -a "$LOGFILE"
 
     if [[ -n "$DOMAIN" ]]; then
-      subsection "subdomains (light) — ${DOMAIN}"
+      subsection "subdomains - ${DOMAIN}"
       SB=$(curl -s -o /dev/null -w "%{size_download}" "${SCHEME}://nonexistent8675309.${DOMAIN}" $INSECURE 2>/dev/null || echo 0)
       ffuf -u "${SCHEME}://FUZZ.${DOMAIN}" -w "$DNS_WL" \
         -t 20 -timeout 5 -fc 404,400 -fs "$SB" -fr \
         $INSECURE -noninteractive 2>>"$LOGFILE" | tee -a "$LOGFILE"
 
-      subsection "vhosts (light) — ${DOMAIN}"
+      subsection "vhosts - ${DOMAIN}"
       VB=$(curl -s -o /dev/null -w "%{size_download}" -H "Host: nonexistent8675309.${DOMAIN}" "${SCHEME}://${TARGET}" $INSECURE 2>/dev/null || echo 0)
       VW=$(curl -s -H "Host: nonexistent8675309.${DOMAIN}" "${SCHEME}://${TARGET}" $INSECURE 2>/dev/null | wc -w | tr -d ' ' || echo 0)
       ffuf -u "${SCHEME}://${TARGET}" -H "Host: FUZZ.${DOMAIN}" -w "$DNS_WL" \
