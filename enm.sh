@@ -302,7 +302,7 @@ section 'Web Recon'
 WEB_BLOCKLIST="593 5985 5986 47001"
 
 RAW_WEB=$(grep -E '^[0-9]+/tcp.*open' "$LOGFILE" |
-  awk '$3 ~ /^https?$/' |
+  awk '$3 ~ /https?/' |
   awk -F/ '{print $1}' | tr '\n' ' ')
 WEB_PORTS=""
 
