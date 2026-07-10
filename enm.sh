@@ -5,7 +5,7 @@ P2='\033[38;5;99m'
 GRAY='\033[38;5;245m'
 YELLOW='\033[38;5;221m'
 RED='\033[38;5;203m'
-BLUE='[38;5;75m'
+BLUE='\033[38;5;75m'
 RESET='\033[0m'
 
 log() { echo -e "$*" | tee -a "$LOGFILE"; }
@@ -41,7 +41,7 @@ add_host() {
     current_ip=$(grep -w "$host" /etc/hosts | awk '{print $1}' | head -1)
 
     if [[ "$current_ip" == "$TARGET" ]]; then
-      info "$host already in /etc/hosts with correct IP ($TARGET) — skipping"
+      info "$host already in /etc/hosts with correct IP ($TARGET) - skipping"
     else
       warn "$host is mapped to $current_ip, but current target is $TARGET"
       ask "replace '$current_ip $host' with '$TARGET $host'? [Y/n]"
@@ -116,13 +116,18 @@ if ! [[ "$TARGET" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
   exit 1
 fi
 
+resolve_domain() {
+  local raw="$1"
+  if [[ "$raw" == *.* ]]; then
+    echo "$raw"
+  else
+    echo "${raw}.htb"
+  fi
+}
+
 DOMAIN=""
 if [[ -n "$NAME" ]]; then
-  if [[ "$NAME" == *.* ]]; then
-    DOMAIN="$NAME"
-  else
-    DOMAIN="${NAME}.htb"
-  fi
+  DOMAIN=$(resolve_domain "$NAME")
 fi
 
 LOGFILE="recon_${TARGET}.log"
@@ -149,7 +154,25 @@ OPEN_PORTS=$(grep -E '^[0-9]+/tcp.*open' "$LOGFILE" | awk -F/ '{print $1}' | tr 
 
 # /etc/hosts ------------------------------
 section "/etc/hosts"
-[[ -n "$DOMAIN" ]] && add_host "$DOMAIN"
+
+EXISTING_HOST=$(awk -v ip="$TARGET" '$1==ip {for(i=2;i<=NF;i++) print $i; exit}' /etc/hosts 2>/dev/null)
+
+if [[ -n "$EXISTING_HOST" ]]; then
+  DOMAIN="$EXISTING_HOST"
+  info "found existing /etc/hosts entry for $TARGET -'$DOMAIN' - skipping"
+else
+  if [[ -z "$DOMAIN" ]]; then
+    ask "no name given (-n) - enter a name for /etc/hosts (blank to skip):"
+    read -r ENTERED_NAME
+    if [[ -n "$ENTERED_NAME" ]]; then
+      DOMAIN=$(resolve_domain "$ENTERED_NAME")
+    else
+      info "no name entered - skipping /etc/hosts"
+    fi
+  fi
+
+  [[ -n "$DOMAIN" ]] && add_host "$DOMAIN"
+fi
 
 # Service enumeration ------------------------------
 section "service enumeration"
@@ -168,7 +191,7 @@ if echo "$OPEN_PORTS" | grep -qwE "445|139"; then
     VULNS=$(echo "$VULN_OUT" | grep -i "VULNERABLE" | sed 's/.*|//' | tr '\n' ' ' || true)
     [[ -n "$VULNS" ]] && warn "VULNERABLE: $VULNS"
   else
-    warn "enum4linux-ng not found — skipping"
+    warn "enum4linux-ng not found - skipping"
   fi
 
 else
