@@ -1,4 +1,4 @@
-# enm
+# <font color="purple">enm</font>
 
 A script i made to quickly scan machines on HackTheBox.
 
@@ -6,15 +6,17 @@ A script i made to quickly scan machines on HackTheBox.
 
 ### Tools
 
-- **nmap** - port scan with `-sC -sV --open --top-ports 1000` (add `-f` for full `-p-` scan), results cached & reused in `nmap_<IP>.txt`
+- **nmap** - port scanner
 - **nxc (NetExec)** - SMB/LDAP/FTP recon & credential attacks
 - **ffuf** - web fuzzing (directories, subdomains, vhosts)
 - **wpscan** - WordPress scanning
 - **evil-winrm** - WinRM login test
 
+---
+
 ### Modules
 
-- **nmap** - full or top-1000 port scan, caches results in `nmap_<IP>.txt` for reuse
+- **nmap** - port scan with `-sC -sV --open --top-ports 1000` (add `-f` for full `-p-` scan), results cached & reused in `nmap_<IP>.txt`
 - **smb** - banner grab, plus shares, users, local groups, logged-on users, RID brute & password policy with credentials (139/445)
 - **ldap** - domain context, users & groups, admin count, trusted-for-delegation & password-not-required flags (389/636/3268/3269)
 - **ftp** - banner + anonymous/authenticated listing (21)
@@ -24,6 +26,8 @@ A script i made to quickly scan machines on HackTheBox.
 - **winrm** - detection hint + auto `evil-winrm` login test (5985/5986)
 
 On top of the modules, the script also manages **/etc/hosts** - automatically adds new entries, replaces or appends to old ones.
+
+---
 
 ### Usage
 
@@ -44,6 +48,8 @@ enm 10.10.11.100 -n mybox -u admin -p 'P@ss1' -m smb,web
 ```
 
 All output is logged to `recon_<IP>.log`.
+
+---
 
 ### Installation
 
