@@ -302,6 +302,7 @@ if [[ -z "$DOMAIN" ]]; then
   if [[ -n "$EXISTING_HOST" ]]; then
     DOMAIN="$EXISTING_HOST"
     info "found existing /etc/hosts entry for $IP - '$DOMAIN'"
+    FOUND_HOST=1
   else
     ask "no name given (-n) - enter a name for /etc/hosts (blank to skip):"
     read -r ENTERED_NAME
@@ -309,7 +310,7 @@ if [[ -z "$DOMAIN" ]]; then
   fi
 fi
 
-[[ -n "$DOMAIN" ]] && add_host "$DOMAIN"
+[[ -n "$DOMAIN" && -z "$FOUND_HOST" ]] && add_host "$DOMAIN"
 
 # smb module -----------------------------------------------------------------------
 
