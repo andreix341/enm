@@ -1,4 +1,4 @@
-# <font color="purple">enm</font>
+# enm
 
 A script i made to quickly scan machines on HackTheBox.
 
