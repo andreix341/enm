@@ -336,7 +336,8 @@ mod_smb() {
     warn "username provided but no password - enumeration flags require both"
     NXC_ARGS+=(-u "$USER_ARG")
   else
-    info "no credentials provided - gathering banner only"
+    info "no credentials provided - attempting null session"
+    NXC_ARGS+=(-u '' -p '' --shares --users --rid-brute)
   fi
 
   show "$(cmdline "${NXC_ARGS[@]}")"
@@ -367,7 +368,8 @@ mod_ldap() {
     warn "username provided but no password - enumeration flags require both"
     NXC_ARGS+=(-u "$USER_ARG")
   else
-    info "no credentials provided - gathering banner only"
+    info "no credentials provided - attempting anonymous bind"
+    NXC_ARGS+=(-u '' -p '' --users)
   fi
 
   show "$(cmdline "${NXC_ARGS[@]}")"
@@ -398,6 +400,7 @@ mod_ftp() {
     NXC_ARGS+=(-u "$USER_ARG")
   else
     info "no credentials provided - attempting anonymous login"
+    NXC_ARGS+=(-u "anonymous" -p "anonymous")
   fi
 
   NXC_ARGS+=(--ls)
