@@ -292,8 +292,6 @@ if [[ -z "$NMAP_OUTPUT" ]]; then
 fi
 parse_ports
 
-info "debug ports -> web: ${WEB_PORTS[*]:-none} | smb: ${SMB_PORTS[*]:-none} | ldap: ${LDAP_PORTS[*]:-none} | ftp: ${FTP_PORTS[*]:-none} | winrm: ${WINRM_PORTS[*]:-none}"
-
 # /etc/hosts -----------------------------------------------------------------------
 section "/etc/hosts"
 
