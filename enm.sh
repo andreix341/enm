@@ -34,8 +34,19 @@ run() {
 }
 
 cmdline() {
+  local out=()
+  local a
+  local prev=""
+  for a in "$@"; do
+    if [[ "$prev" == "-p" || -z "$a" || "$a" == *" "* ]]; then
+      out+=("'$a'")
+    else
+      out+=("$a")
+    fi
+    prev="$a"
+  done
   local IFS=' '
-  printf '%s\n' "$*"
+  printf '%s\n' "${out[*]}"
 }
 
 require_tool() {
@@ -338,8 +349,21 @@ mod_smb() {
     NXC_ARGS+=(-u '' -p '' --shares --users --rid-brute)
   fi
 
+  echo
   show "$(cmdline "${NXC_ARGS[@]}")"
   run "${NXC_ARGS[@]}"
+
+  echo
+  info "smbclient uses tree-connect based share listing, which some hosts allow even when nxc's RPC-based (srvsvc) share enumeration is denied"
+  if require_tool smbclient; then
+    if [[ -n "$USER_ARG" && -n "$PASS_ARG" ]]; then
+      SMBCLIENT_ARGS=(smbclient -L "//${SMB_TARGET}/" -U "${USER_ARG}%${PASS_ARG}")
+    else
+      SMBCLIENT_ARGS=(smbclient -L "//${SMB_TARGET}/" -N)
+    fi
+    show "$(cmdline "${SMBCLIENT_ARGS[@]}")"
+    run "${SMBCLIENT_ARGS[@]}"
+  fi
 }
 
 # ldap module -----------------------------------------------------------------------

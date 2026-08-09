@@ -7,6 +7,7 @@ A script i made to quickly scan machines on HackTheBox.
 ### Tools
 
 - **nmap** - port scanner
+- **smbclient** - SMB enumeration (tree-connect based share listing, which some hosts allow even when nxc's RPC-based (srvsvc) share enumeration is denied)
 - **nxc (NetExec)** - SMB/LDAP/FTP recon & credential attacks
 - **ffuf** - web fuzzing (directories, subdomains, vhosts)
 - **wpscan** - WordPress scanning
@@ -59,20 +60,20 @@ Install all required tools for your distro, then install the script.
 
 ```bash
 apt update
-apt install nmap seclists ffuf wpscan evil-winrm netexec
+apt install nmap smbclient seclists ffuf wpscan evil-winrm netexec
 ```
 
 **BlackArch**
 
 ```bash
-pacman -Syu nmap seclists ffuf wpscan evil-winrm netexec
+pacman -Syu nmap smbclient seclists ffuf wpscan evil-winrm netexec
 ```
 
 **ParrotSec**
 
 ```bash
 apt update
-apt install nmap seclists ffuf wpscan evil-winrm netexec
+apt install nmap smbclient seclists ffuf wpscan evil-winrm netexec
 ```
 
 **Install the script**
