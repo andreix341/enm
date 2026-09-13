@@ -61,6 +61,7 @@ require_tool() {
 section() {
   local cols
   cols=$(tput cols 2>/dev/null || echo 80)
+  ((cols > 60)) && cols=60
   local line
   printf -v line "%${cols}s" ''
   line="${line// /─}"
@@ -71,7 +72,7 @@ section() {
 subsection() {
   local cols
   cols=$(tput cols 2>/dev/null || echo 80)
-  cols=$((cols / 2))
+  ((cols > 60)) && cols=60
   local line
   printf -v line "%${cols}s" ''
   line="${line// /─}"
@@ -559,7 +560,7 @@ mod_web() {
     INSECURE=""
     [[ "$SCHEME" == "https" ]] && INSECURE="-k"
 
-    subsection "Directories - ${BASE_URL}"
+    subsection "Directories - ${SCHEME}://${WEB_IP}:${PORT}"
     info "Use Ctrl + C to skip"
     FFUF_ARGS=(ffuf -s -u "${BASE_URL}/FUZZ" -w "$DIR_WL" -t 80 -fc 404,403 -ac -noninteractive)
     [[ -n "$INSECURE" ]] && FFUF_ARGS+=(-k)
@@ -567,20 +568,20 @@ mod_web() {
     run "${FFUF_ARGS[@]}"
 
     if [[ -n "$DOMAIN" ]]; then
-      subsection "Subdomains - ${DOMAIN}"
+      subsection "Subdomains - ${SCHEME}://FUZZ.${DOMAIN}:${PORT}"
       FFUF_ARGS=(ffuf -s -u "${SCHEME}://FUZZ.${DOMAIN}" -w "$DNS_WL" -t 20 -timeout 5 -fc 404,400 -ac -noninteractive)
       [[ -n "$INSECURE" ]] && FFUF_ARGS+=(-k)
       show "$(cmdline "${FFUF_ARGS[@]}")"
       run "${FFUF_ARGS[@]}"
 
-      subsection "Vhosts - ${DOMAIN}"
+      subsection "Vhosts - ${SCHEME}://${IP}:${PORT}"
       FFUF_ARGS=(ffuf -s -u "${SCHEME}://${IP}" -H "Host: FUZZ.${DOMAIN}" -w "$DNS_WL" -t 15 -timeout 5 -fc 404,400 -ac -noninteractive)
       [[ -n "$INSECURE" ]] && FFUF_ARGS+=(-k)
       show "$(cmdline "${FFUF_ARGS[@]}")"
       run "${FFUF_ARGS[@]}"
     fi
 
-    subsection "WordPress Scan"
+    subsection "WordPress - ${SCHEME}://${WEB_IP}:${PORT}"
     if require_tool wpscan; then
       WPSCAN_ARGS=(wpscan --url "$BASE_URL" --no-banner)
       [[ "$SCHEME" == "https" ]] && WPSCAN_ARGS+=(--disable-tls-checks)
